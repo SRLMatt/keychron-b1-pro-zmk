@@ -45,6 +45,60 @@ jobs:
           cd zephyr-sdk-0.15.2
           ./setup.sh -t arm-zephyr-eabi -h -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$GITHUB_WORKSPACE/zephyr-sdk-0.15.2" >> $GITHUB_ENV
+          
+      - name: Patch Zephyr BAS battery function
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("zephyr/subsys/bluetooth/services/bas.c")
+          text = path.read_text()
+
+          if "bt_bas_set_battery_level_fix" in text:
+              print("BAS fix already present")
+              raise SystemExit(0)
+
+          needle = """int bt_bas_set_battery_level(uint8_t level)
+{
+	int rc;
+
+	if (level > 100U) {
+		return -EINVAL;
+	}
+
+	battery_level = level;
+
+	rc = bt_gatt_notify(NULL, &bas.attrs[1], &level, sizeof(level));
+
+	return rc == -ENOTCONN ? 0 : rc;
+}
+"""
+
+          insert = needle + """
+int bt_bas_set_battery_level_fix(struct bt_conn *conn, uint8_t level)
+{
+	int rc;
+
+	battery_level = level;
+	if (level > 100U || conn == NULL) {
+		if (level > 100U) {
+			battery_level = 100;
+		}
+		return -EINVAL;
+	}
+
+	rc = bt_gatt_notify(conn, &bas.attrs[1], &level, sizeof(level));
+
+	return rc == -ENOTCONN ? 0 : rc;
+}
+"""
+
+          if needle not in text:
+              raise SystemExit("Could not find bt_bas_set_battery_level block to patch")
+
+          path.write_text(text.replace(needle, insert))
+          print("Patched Zephyr BAS battery function")
+          PY
 
       - name: Build B1 UK firmware
         run: |
