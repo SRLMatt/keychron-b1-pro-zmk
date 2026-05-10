@@ -1,0 +1,53 @@
+name: Build Keychron B1 UK Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - b1-lily-port
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git cmake ninja-build gperf ccache dfu-util device-tree-compiler wget \
+            python3-dev python3-pip python3-setuptools python3-wheel xz-utils file \
+            make gcc gcc-multilib g++-multilib libsdl2-dev libmagic1
+
+      - name: Install west
+        run: |
+          python3 -m pip install --user -U west
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Initialise west workspace
+        run: |
+          west init -l app
+          west update
+          west zephyr-export
+
+      - name: Install Python requirements
+        run: |
+          python3 -m pip install --user -r zephyr/scripts/requirements.txt
+          python3 -m pip install --user -r app/scripts/requirements.txt
+
+      - name: Build B1 UK firmware
+        run: |
+          cd app
+          west build -b keychron -p -- -DSHIELD=keychron_b1_uk
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keychron-b1-uk-firmware
+          path: |
+            app/build/zephyr/*.uf2
+            app/build/zephyr/*.bin
+            app/build/zephyr/*.hex
