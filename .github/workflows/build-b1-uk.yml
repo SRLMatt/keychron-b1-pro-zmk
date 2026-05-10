@@ -45,61 +45,20 @@ jobs:
           cd zephyr-sdk-0.15.2
           ./setup.sh -t arm-zephyr-eabi -h -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$GITHUB_WORKSPACE/zephyr-sdk-0.15.2" >> $GITHUB_ENV
-          
+
       - name: Patch Zephyr BAS battery function
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
+          BAS_FILE="zephyr/subsys/bluetooth/services/bas.c"
 
-          path = Path("zephyr/subsys/bluetooth/services/bas.c")
-          text = path.read_text()
+          if grep -q "bt_bas_set_battery_level_fix" "$BAS_FILE"; then
+            echo "BAS fix already present"
+            exit 0
+          fi
 
-          if "bt_bas_set_battery_level_fix" in text:
-              print("BAS fix already present")
-              raise SystemExit(0)
+          perl -0pi -e 's/int bt_bas_set_battery_level\(uint8_t level\)\n\{\n\tint rc;\n\n\tif \(level > 100U\) \{\n\t\treturn -EINVAL;\n\t\}\n\n\tbattery_level = level;\n\n\trc = bt_gatt_notify\(NULL, &bas\.attrs\[1\], &level, sizeof\(level\)\);\n\n\treturn rc == -ENOTCONN \? 0 : rc;\n\}\n/int bt_bas_set_battery_level(uint8_t level)\n{\n\tint rc;\n\n\tif (level > 100U) {\n\t\treturn -EINVAL;\n\t}\n\n\tbattery_level = level;\n\n\trc = bt_gatt_notify(NULL, \&bas.attrs[1], \&level, sizeof(level));\n\n\treturn rc == -ENOTCONN ? 0 : rc;\n}\n\nint bt_bas_set_battery_level_fix(struct bt_conn *conn, uint8_t level)\n{\n\tint rc;\n\n\tbattery_level = level;\n\tif (level > 100U || conn == NULL) {\n\t\tif (level > 100U) {\n\t\t\tbattery_level = 100;\n\t\t}\n\t\treturn -EINVAL;\n\t}\n\n\trc = bt_gatt_notify(conn, \&bas.attrs[1], \&level, sizeof(level));\n\n\treturn rc == -ENOTCONN ? 0 : rc;\n}\n/s' "$BAS_FILE"
 
-          needle = """int bt_bas_set_battery_level(uint8_t level)
-{
-	int rc;
-
-	if (level > 100U) {
-		return -EINVAL;
-	}
-
-	battery_level = level;
-
-	rc = bt_gatt_notify(NULL, &bas.attrs[1], &level, sizeof(level));
-
-	return rc == -ENOTCONN ? 0 : rc;
-}
-"""
-
-          insert = needle + """
-int bt_bas_set_battery_level_fix(struct bt_conn *conn, uint8_t level)
-{
-	int rc;
-
-	battery_level = level;
-	if (level > 100U || conn == NULL) {
-		if (level > 100U) {
-			battery_level = 100;
-		}
-		return -EINVAL;
-	}
-
-	rc = bt_gatt_notify(conn, &bas.attrs[1], &level, sizeof(level));
-
-	return rc == -ENOTCONN ? 0 : rc;
-}
-"""
-
-          if needle not in text:
-              raise SystemExit("Could not find bt_bas_set_battery_level block to patch")
-
-          path.write_text(text.replace(needle, insert))
-          print("Patched Zephyr BAS battery function")
-          PY
-
+          grep -q "bt_bas_set_battery_level_fix" "$BAS_FILE"
+          
       - name: Build B1 UK firmware
         run: |
           cd app
